@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef RMW_GURUMDDS_CPP__QOS_HPP_
-#define RMW_GURUMDDS_CPP__QOS_HPP_
+#ifndef RMW_GURUMDDS__QOS_HPP_
+#define RMW_GURUMDDS__QOS_HPP_
 
 #include <cassert>
 #include <limits>
@@ -23,68 +23,51 @@
 #include "rmw/incompatible_qos_events_statuses.h"
 
 #include "rmw_gurumdds_cpp/dds_include.hpp"
-#include "rmw_gurumdds_cpp/visibility_control.h"
 
-RMW_GURUMDDS_CPP_PUBLIC
+namespace rmw_gurumdds_cpp
+{
+dds_Duration_t
+rmw_time_to_dds(const rmw_time_t & time);
+
+rmw_time_t
+dds_duration_to_rmw(const dds_Duration_t & duration);
+
 bool
-get_datawriter_qos(
-  dds_Publisher * publisher,
+get_datawriter_qos(dds_Publisher * publisher,
   const rmw_qos_profile_t * qos_profile,
+  const rosidl_type_hash_t & type_hash,
   dds_DataWriterQos * datawriter_qos);
 
-RMW_GURUMDDS_CPP_PUBLIC
 bool
 get_datareader_qos(
   dds_Subscriber * subscriber,
   const rmw_qos_profile_t * qos_profile,
+  const rosidl_type_hash_t & type_hash,
   dds_DataReaderQos * datareader_qos);
 
-RMW_GURUMDDS_CPP_PUBLIC
 rmw_qos_history_policy_t
-convert_history(
-  const dds_HistoryQosPolicy * const policy);
+convert_history(const dds_HistoryQosPolicy * const policy);
 
-RMW_GURUMDDS_CPP_PUBLIC
 rmw_qos_reliability_policy_t
-convert_reliability(
-  const dds_ReliabilityQosPolicy * const policy);
+convert_reliability(const dds_ReliabilityQosPolicy * const policy);
 
-RMW_GURUMDDS_CPP_PUBLIC
 rmw_qos_durability_policy_t
-convert_durability(
-  const dds_DurabilityQosPolicy * const policy);
+convert_durability(const dds_DurabilityQosPolicy * const policy);
 
-RMW_GURUMDDS_CPP_PUBLIC
 rmw_time_t
-convert_deadline(
-  const dds_DeadlineQosPolicy * const policy);
+convert_deadline(const dds_DeadlineQosPolicy * const policy);
 
-RMW_GURUMDDS_CPP_PUBLIC
 rmw_time_t
-convert_lifespan(
-  const dds_LifespanQosPolicy * const policy);
+convert_lifespan(const dds_LifespanQosPolicy * const policy);
 
-RMW_GURUMDDS_CPP_PUBLIC
 rmw_qos_liveliness_policy_t
-convert_liveliness(
-  const dds_LivelinessQosPolicy * const policy);
+convert_liveliness(const dds_LivelinessQosPolicy * const policy);
 
-RMW_GURUMDDS_CPP_PUBLIC
 rmw_time_t
-convert_liveliness_lease_duration(
-  const dds_LivelinessQosPolicy * const policy);
+convert_liveliness_lease_duration(const dds_LivelinessQosPolicy * const policy);
 
-RMW_GURUMDDS_CPP_PUBLIC
 rmw_qos_policy_kind_t
-convert_qos_policy(
-  dds_QosPolicyId_t policy_id);
+convert_qos_policy(const dds_QosPolicyId_t policy_id);
+} // namespace rmw_gurumdds_cpp
 
-RMW_GURUMDDS_CPP_PUBLIC
-dds_Duration_t rmw_time_to_dds(
-  const rmw_time_t & time);
-
-RMW_GURUMDDS_CPP_PUBLIC
-rmw_time_t dds_duration_to_rmw(
-  const dds_Duration_t & duration);
-
-#endif  // RMW_GURUMDDS_CPP__QOS_HPP_
+#endif // RMW_GURUMDDS__QOS_HPP_

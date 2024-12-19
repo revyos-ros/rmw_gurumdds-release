@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "rmw/rmw.h"
 #include "rmw/error_handling.h"
 #include "rmw/impl/cpp/macros.hpp"
+#include "rmw/rmw.h"
 
 #include "rmw_gurumdds_cpp/event_converter.hpp"
 #include "rmw_gurumdds_cpp/identifier.hpp"
-#include "rmw_gurumdds_cpp/types.hpp"
+#include "rmw_gurumdds_cpp/event_info_common.hpp"
 
 static rmw_ret_t
 init_rmw_event(
@@ -94,15 +94,14 @@ rmw_take_event(
 
   rmw_ret_t ret_code = RMW_RET_UNSUPPORTED;
 
-  if (is_event_supported(event_handle->event_type)) {
-    dds_StatusKind status_kind = get_status_kind_from_rmw(event_handle->event_type);
-    auto custom_event_info = static_cast<GurumddsEventInfo *>(event_handle->data);
-    ret_code = custom_event_info->get_status(status_kind, event_info);
+  if (rmw_gurumdds_cpp::is_event_supported(event_handle->event_type)) {
+    auto custom_event_info = static_cast<rmw_gurumdds_cpp::EventInfo *>(event_handle->data);
+    ret_code = custom_event_info->get_status(event_handle->event_type, event_info);
   } else {
     RMW_SET_ERROR_MSG_WITH_FORMAT_STRING("event %d not supported", event_handle->event_type);
   }
 
-  *taken = (ret_code == RMW_RET_OK);
+  *taken = ret_code == RMW_RET_OK;
   return ret_code;
 }
 
@@ -112,11 +111,10 @@ rmw_event_set_callback(
   rmw_event_callback_t callback,
   const void * user_data)
 {
-  (void)rmw_event;
-  (void)callback;
-  (void)user_data;
-
-  RMW_SET_ERROR_MSG("rmw_event_set_callback not implemented");
-  return RMW_RET_UNSUPPORTED;
+  RCUTILS_UNUSED(rmw_event);
+  RCUTILS_UNUSED(callback);
+  RCUTILS_UNUSED(user_data);
+  auto event_info = static_cast<rmw_gurumdds_cpp::EventInfo*>(rmw_event->data);
+  return event_info->set_on_new_event_callback(rmw_event->event_type, user_data, callback);
 }
 }  // extern "C"

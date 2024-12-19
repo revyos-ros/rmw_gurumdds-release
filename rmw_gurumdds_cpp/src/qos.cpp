@@ -12,8 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <limits>
+#include <cstring>
+#include <string>
 
+#include "rosidl_runtime_c/type_hash.h"
+
+#include "rmw_dds_common/qos.hpp"
 #include "rmw_dds_common/time_utils.hpp"
 
 #include "rmw_gurumdds_cpp/qos.hpp"
@@ -23,6 +27,8 @@ static inline bool is_time_unspecified(const rmw_time_t & time)
   return rmw_time_equal(time, RMW_DURATION_UNSPECIFIED);
 }
 
+namespace rmw_gurumdds_cpp
+{
 dds_Duration_t
 rmw_time_to_dds(const rmw_time_t & time)
 {
@@ -141,8 +147,8 @@ bool
 get_datawriter_qos(
   dds_Publisher * publisher,
   const rmw_qos_profile_t * qos_profile,
-  dds_DataWriterQos * datawriter_qos)
-{
+  const rosidl_type_hash_t & type_hash,
+  dds_DataWriterQos * datawriter_qos) {
   dds_ReturnCode_t ret = dds_Publisher_get_default_datawriter_qos(publisher, datawriter_qos);
   if (ret != dds_RETCODE_OK) {
     RMW_SET_ERROR_MSG("failed to get default datawriter qos");
@@ -155,12 +161,23 @@ get_datawriter_qos(
 
   set_entity_qos_from_profile_generic(qos_profile, datawriter_qos);
 
+  std::string user_data_str;
+  if (RMW_RET_OK != rmw_dds_common::encode_type_hash_for_user_data_qos(type_hash, user_data_str)) {
+    user_data_str.clear();
+    // Since we are going to go on without a hash, we clear the error so other
+    // code won't overwrite it.
+    rmw_reset_error();
+  }
+
+  std::memcpy(datawriter_qos->user_data.value, user_data_str.data(), user_data_str.size());
+
   return true;
 }
 
 bool get_datareader_qos(
   dds_Subscriber * subscriber,
   const rmw_qos_profile_t * qos_profile,
+  const rosidl_type_hash_t & type_hash,
   dds_DataReaderQos * datareader_qos)
 {
   dds_ReturnCode_t ret = dds_Subscriber_get_default_datareader_qos(subscriber, datareader_qos);
@@ -171,12 +188,22 @@ bool get_datareader_qos(
 
   set_entity_qos_from_profile_generic(qos_profile, datareader_qos);
 
+
+  std::string user_data_str;
+  if (RMW_RET_OK != rmw_dds_common::encode_type_hash_for_user_data_qos(type_hash, user_data_str)) {
+    user_data_str.clear();
+    // Since we are going to go on without a hash, we clear the error so other
+    // code won't overwrite it.
+    rmw_reset_error();
+  }
+
+  std::memcpy(datareader_qos->user_data.value, user_data_str.data(), user_data_str.size());
+
   return true;
 }
 
 rmw_qos_history_policy_t
-convert_history(
-  const dds_HistoryQosPolicy * const policy)
+convert_history(const dds_HistoryQosPolicy * const policy)
 {
   switch (policy->kind) {
     case dds_KEEP_LAST_HISTORY_QOS:
@@ -189,8 +216,7 @@ convert_history(
 }
 
 rmw_qos_reliability_policy_t
-convert_reliability(
-  const dds_ReliabilityQosPolicy * const policy)
+convert_reliability(const dds_ReliabilityQosPolicy * const policy)
 {
   switch (policy->kind) {
     case dds_BEST_EFFORT_RELIABILITY_QOS:
@@ -203,8 +229,7 @@ convert_reliability(
 }
 
 rmw_qos_durability_policy_t
-convert_durability(
-  const dds_DurabilityQosPolicy * const policy)
+convert_durability(const dds_DurabilityQosPolicy * const policy)
 {
   switch (policy->kind) {
     case dds_VOLATILE_DURABILITY_QOS:
@@ -217,23 +242,20 @@ convert_durability(
 }
 
 rmw_time_t
-convert_deadline(
-  const dds_DeadlineQosPolicy * const policy)
+convert_deadline(const dds_DeadlineQosPolicy * const policy)
 {
   return dds_duration_to_rmw(policy->period);
 }
 
 rmw_time_t
-convert_lifespan(
-  const dds_LifespanQosPolicy * const policy)
+convert_lifespan(const dds_LifespanQosPolicy * const policy)
 {
   rmw_time_t time = RMW_DURATION_INFINITE;
   return policy == nullptr ? time : dds_duration_to_rmw(policy->duration);
 }
 
 rmw_qos_liveliness_policy_t
-convert_liveliness(
-  const dds_LivelinessQosPolicy * const policy)
+convert_liveliness(const dds_LivelinessQosPolicy * const policy)
 {
   switch (policy->kind) {
     case dds_AUTOMATIC_LIVELINESS_QOS:
@@ -246,29 +268,29 @@ convert_liveliness(
 }
 
 rmw_time_t
-convert_liveliness_lease_duration(
-  const dds_LivelinessQosPolicy * const policy)
+convert_liveliness_lease_duration(const dds_LivelinessQosPolicy * const policy)
 {
   return dds_duration_to_rmw(policy->lease_duration);
 }
 
 rmw_qos_policy_kind_t
-convert_qos_policy(
-  dds_QosPolicyId_t policy_id)
+convert_qos_policy(const dds_QosPolicyId_t policy_id)
 {
-  if (policy_id == dds_HISTORY_QOS_POLICY_ID) {
-    return RMW_QOS_POLICY_HISTORY;
-  } else if (policy_id == dds_RELIABILITY_QOS_POLICY_ID) {
-    return RMW_QOS_POLICY_RELIABILITY;
-  } else if (policy_id == dds_DURABILITY_QOS_POLICY_ID) {
-    return RMW_QOS_POLICY_DURABILITY;
-  } else if (policy_id == dds_DEADLINE_QOS_POLICY_ID) {
-    return RMW_QOS_POLICY_DEADLINE;
-  } else if (policy_id == dds_LIFESPAN_QOS_POLICY_ID) {
-    return RMW_QOS_POLICY_LIFESPAN;
-  } else if (policy_id == dds_LIVELINESS_QOS_POLICY_ID) {
-    return RMW_QOS_POLICY_LIVELINESS;
+  switch(policy_id) {
+    case dds_HISTORY_QOS_POLICY_ID:
+      return RMW_QOS_POLICY_HISTORY;
+    case dds_RELIABILITY_QOS_POLICY_ID:
+      return RMW_QOS_POLICY_RELIABILITY;
+    case dds_DURABILITY_QOS_POLICY_ID:
+      return RMW_QOS_POLICY_DURABILITY;
+    case dds_DEADLINE_QOS_POLICY_ID:
+      return RMW_QOS_POLICY_DEADLINE;
+    case dds_LIFESPAN_QOS_POLICY_ID:
+        return RMW_QOS_POLICY_LIFESPAN;
+    case dds_LIVELINESS_QOS_POLICY_ID:
+      return RMW_QOS_POLICY_LIVELINESS;
+    default:
+      return RMW_QOS_POLICY_INVALID;
   }
-
-  return RMW_QOS_POLICY_INVALID;
 }
+} // namespace rmw_gurumdds_cpp

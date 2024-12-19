@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "rmw/rmw.h"
 #include "rmw/error_handling.h"
-#include "rmw/types.h"
 #include "rmw/impl/cpp/macros.hpp"
+#include "rmw/rmw.h"
+#include "rmw/types.h"
+
+#include "rmw_dds_common/gid_utils.hpp"
 
 #include "rmw_gurumdds_cpp/identifier.hpp"
-#include "rmw_gurumdds_cpp/types.hpp"
 
 extern "C"
 {
@@ -39,19 +40,7 @@ rmw_compare_gids_equal(const rmw_gid_t * gid1, const rmw_gid_t * gid2, bool * re
     return RMW_RET_INCORRECT_RMW_IMPLEMENTATION);
   RMW_CHECK_ARGUMENT_FOR_NULL(result, RMW_RET_INVALID_ARGUMENT);
 
-  const GurumddsPublisherGID * c_gid1 = reinterpret_cast<const GurumddsPublisherGID *>(gid1->data);
-  if (c_gid1 == nullptr) {
-    RMW_SET_ERROR_MSG("gid1 is invalid");
-    return RMW_RET_ERROR;
-  }
-
-  const GurumddsPublisherGID * c_gid2 = reinterpret_cast<const GurumddsPublisherGID *>(gid2->data);
-  if (c_gid2 == nullptr) {
-    RMW_SET_ERROR_MSG("gid2 is invalid");
-    return RMW_RET_ERROR;
-  }
-
-  *result = memcmp(c_gid1->publication_handle, c_gid2->publication_handle, 16) == 0;
+  *result = gid1 == gid2;
   return RMW_RET_OK;
 }
 }  // extern "C"

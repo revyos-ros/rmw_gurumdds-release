@@ -12,20 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef RMW_GURUMDDS_CPP__RMW_CONTEXT_IMPL_HPP_
-#define RMW_GURUMDDS_CPP__RMW_CONTEXT_IMPL_HPP_
+#ifndef RMW_GURUMDDS__RMW_CONTEXT_IMPL_HPP_
+#define RMW_GURUMDDS__RMW_CONTEXT_IMPL_HPP_
 
-#include <stdio.h>
-
-#include <limits>
-#include <list>
-#include <map>
+#include <memory>
 #include <mutex>
 #include <regex>
 #include <string>
 
+#include "rcpputils/scope_exit.hpp"
+#include "rcutils/logging_macros.h"
+
+#include "rmw/allocators.h"
 #include "rmw/error_handling.h"
-#include "rmw/event.h"
 #include "rmw/get_node_info_and_types.h"
 #include "rmw/get_service_names_and_types.h"
 #include "rmw/get_topic_endpoint_info.h"
@@ -33,14 +32,32 @@
 #include "rmw/impl/cpp/macros.hpp"
 #include "rmw/names_and_types.h"
 #include "rmw/topic_endpoint_info_array.h"
+#include "rmw/types.h"
 
 #include "rmw_dds_common/context.hpp"
 #include "rmw_dds_common/msg/participant_entities_info.hpp"
 
 #include "rmw_gurumdds_cpp/dds_include.hpp"
+#include "rmw_gurumdds_cpp/graph_cache.hpp"
 #include "rmw_gurumdds_cpp/identifier.hpp"
 
-#include "rcutils/strdup.h"
+namespace rmw_gurumdds_cpp
+{
+void on_participant_changed(
+  const dds_DomainParticipant * a_participant,
+  const dds_ParticipantBuiltinTopicData * data,
+  dds_InstanceHandle_t handle);
+
+void on_publication_changed(
+  const dds_DomainParticipant * a_participant,
+  const dds_PublicationBuiltinTopicData * data,
+  dds_InstanceHandle_t handle);
+
+void on_subscription_changed(
+  const dds_DomainParticipant * a_participant,
+  const dds_SubscriptionBuiltinTopicData * data,
+  dds_InstanceHandle_t handle);
+} // namespace rmw_gurumdds_cpp
 
 struct rmw_context_impl_s
 {
@@ -50,7 +67,7 @@ struct rmw_context_impl_s
   dds_DomainId_t domain_id;
   dds_DomainParticipant * participant;
 
-  /* used for all DDS writers/readers created to support RMW Gurumdds(Publisher/Subscriber)Info. */
+  /* used for all DDS writers/readers created to support rmw_gurumdds_cpp::(Publisher/Subscriber)Info. */
   dds_Publisher * publisher;
   dds_Subscriber * subscriber;
 
@@ -68,28 +85,8 @@ struct rmw_context_impl_s
 
   std::mutex endpoint_mutex;
 
-  explicit rmw_context_impl_s(rmw_context_t * const base)
-  : common_ctx(),
-    base(base),
-    domain_id(base->actual_domain_id),
-    participant(nullptr),
-    publisher(nullptr),
-    subscriber(nullptr),
-    localhost_only(base->options.localhost_only == RMW_LOCALHOST_ONLY_ENABLED)
-  {
-    /* destructor relies on these being initialized properly */
-    common_ctx.thread_is_running.store(false);
-    common_ctx.graph_guard_condition = nullptr;
-    common_ctx.pub = nullptr;
-    common_ctx.sub = nullptr;
-  }
-
-  ~rmw_context_impl_s()
-  {
-    if (0u != this->node_count) {
-      RCUTILS_LOG_ERROR_NAMED(RMW_GURUMDDS_ID, "not all nodes finalized: %lu", this->node_count);
-    }
-  }
+  explicit rmw_context_impl_s(rmw_context_t * const base);
+  ~rmw_context_impl_s();
 
   // Initializes the participant, if it wasn't done already.
   // node_count is increased
@@ -115,4 +112,4 @@ struct rmw_context_impl_s
   finalize();
 };
 
-#endif  // RMW_GURUMDDS_CPP__RMW_CONTEXT_IMPL_HPP_
+#endif // RMW_GURUMDDS__RMW_CONTEXT_IMPL_HPP_

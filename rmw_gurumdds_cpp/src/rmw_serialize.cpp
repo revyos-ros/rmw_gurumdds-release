@@ -13,10 +13,15 @@
 // limitations under the License.
 
 #include "rmw/error_handling.h"
-#include "rmw/serialized_message.h"
 #include "rmw/rmw.h"
+#include "rmw/serialized_message.h"
 
-#include "type_support_common.hpp"
+#include "rosidl_typesupport_introspection_c/field_types.h"
+#include "rosidl_typesupport_introspection_c/identifier.h"
+#include "rosidl_typesupport_introspection_c/message_introspection.h"
+#include "rosidl_typesupport_introspection_cpp/identifier.hpp"
+
+#include "rmw_gurumdds_cpp/type_support_common.hpp"
 
 extern "C"
 {
@@ -37,7 +42,7 @@ rmw_serialize(
     }
   }
 
-  ssize_t ssize = get_serialized_size(
+  ssize_t ssize = rmw_gurumdds_cpp::get_serialized_size(
     ts->data,
     ts->typesupport_identifier,
     ros_message
@@ -60,7 +65,7 @@ rmw_serialize(
     serialized_message->buffer_capacity = size;
   }
 
-  bool res = serialize_ros_to_cdr(
+  bool res = rmw_gurumdds_cpp::serialize_ros_to_cdr(
     ts->data,
     ts->typesupport_identifier,
     ros_message,
@@ -92,7 +97,7 @@ rmw_deserialize(
     }
   }
 
-  bool res = deserialize_cdr_to_ros(
+  bool res = rmw_gurumdds_cpp::deserialize_cdr_to_ros(
     ts->data,
     ts->typesupport_identifier,
     ros_message,

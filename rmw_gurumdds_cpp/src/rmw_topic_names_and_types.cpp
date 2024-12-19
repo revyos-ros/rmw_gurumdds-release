@@ -14,15 +14,10 @@
 
 #include <map>
 #include <set>
-#include <string>
 
 #include "rcutils/allocator.h"
-#include "rcutils/logging_macros.h"
-#include "rcutils/strdup.h"
-#include "rcutils/types/string_array.h"
 
 #include "rmw/allocators.h"
-#include "rmw/convert_rcutils_ret_to_rmw_ret.h"
 #include "rmw/error_handling.h"
 #include "rmw/get_topic_names_and_types.h"
 #include "rmw/impl/cpp/macros.hpp"
@@ -31,7 +26,6 @@
 #include "rmw_gurumdds_cpp/dds_include.hpp"
 #include "rmw_gurumdds_cpp/demangle.hpp"
 #include "rmw_gurumdds_cpp/identifier.hpp"
-#include "rmw_gurumdds_cpp/names_and_types_helpers.hpp"
 #include "rmw_gurumdds_cpp/rmw_context_impl.hpp"
 
 extern "C"
@@ -56,12 +50,12 @@ rmw_get_topic_names_and_types(
     return RMW_RET_INVALID_ARGUMENT;
   }
 
-  DemangleFunction demangle_topic = _demangle_ros_topic_from_topic;
-  DemangleFunction demangle_type = _demangle_if_ros_type;
+  DemangleFunction demangle_topic = rmw_gurumdds_cpp::demangle_ros_topic_from_topic;
+  DemangleFunction demangle_type = rmw_gurumdds_cpp::demangle_if_ros_type;
 
   if (no_demangle) {
-    demangle_topic = _identity_demangle;
-    demangle_type = _identity_demangle;
+    demangle_topic = rmw_gurumdds_cpp::identity_demangle;
+    demangle_type = rmw_gurumdds_cpp::identity_demangle;
   }
 
   auto common_ctx = &node->context->impl->common_ctx;

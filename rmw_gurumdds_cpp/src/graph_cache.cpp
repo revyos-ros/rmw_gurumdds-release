@@ -17,24 +17,25 @@
 #include "rmw/publisher_options.h"
 #include "rmw/subscription_options.h"
 #include "rmw/qos_profiles.h"
+#include "rmw_dds_common/qos.hpp"
 
 #include "rmw_gurumdds_cpp/context_listener_thread.hpp"
-#include "rmw_gurumdds_cpp/gid.hpp"
-#include "rmw_gurumdds_cpp/qos.hpp"
 #include "rmw_gurumdds_cpp/graph_cache.hpp"
+#include "rmw_gurumdds_cpp/qos.hpp"
 #include "rmw_gurumdds_cpp/rmw_context_impl.hpp"
+#include "rmw_gurumdds_cpp/gid.hpp"
 #include "rmw_gurumdds_cpp/rmw_publisher.hpp"
 #include "rmw_gurumdds_cpp/rmw_subscription.hpp"
 
 #include "rosidl_typesupport_cpp/message_type_support.hpp"
 
-static rmw_ret_t
-__add_entity(
+static rmw_ret_t add_entity(
   rmw_context_impl_t * ctx,
   const rmw_gid_t * const endp_gid,
   const rmw_gid_t * const dp_gid,
   const char * const topic_name,
   const char * const type_name,
+  const rosidl_type_hash_s & type_hash,
   const dds_HistoryQosPolicy * const history,
   const dds_ReliabilityQosPolicy * const reliability,
   const dds_DurabilityQosPolicy * const durability,
@@ -42,37 +43,29 @@ __add_entity(
   const dds_LivelinessQosPolicy * const liveliness,
   const dds_LifespanQosPolicy * const lifespan,
   const bool is_reader,
-  const bool local)
-{
-  (void)local;
-  rmw_qos_profile_t qos_profile = {};
-
+  const bool local) {
+  RCUTILS_UNUSED(local);
+  size_t history_depth = RMW_QOS_POLICY_DEPTH_SYSTEM_DEFAULT;
+  rmw_qos_history_policy_e history_kind = RMW_QOS_POLICY_HISTORY_UNKNOWN;
   if (history != nullptr) {
-    qos_profile = {
-      convert_history(history),
-      static_cast<size_t>(history->depth),
-      convert_reliability(reliability),
-      convert_durability(durability),
-      convert_deadline(deadline),
-      convert_lifespan(lifespan),
-      convert_liveliness(liveliness),
-      convert_liveliness_lease_duration(liveliness),
-      false,
-    };
-  } else {
-    qos_profile = {
-      RMW_QOS_POLICY_HISTORY_UNKNOWN,
-      RMW_QOS_POLICY_DEPTH_SYSTEM_DEFAULT,
-      convert_reliability(reliability),
-      convert_durability(durability),
-      convert_deadline(deadline),
-      convert_lifespan(lifespan),
-      convert_liveliness(liveliness),
-      convert_liveliness_lease_duration(liveliness),
-      false,
-    };
+    history_depth = static_cast<size_t>(history->depth);
+    history_kind = rmw_gurumdds_cpp::convert_history(history);
   }
 
+  rmw_qos_profile_t qos_profile{
+    history_kind,
+    history_depth,
+    rmw_gurumdds_cpp::convert_reliability(reliability),
+    rmw_gurumdds_cpp::convert_durability(durability),
+    rmw_gurumdds_cpp::convert_deadline(deadline),
+    rmw_gurumdds_cpp::convert_lifespan(lifespan),
+    rmw_gurumdds_cpp::convert_liveliness(liveliness),
+    rmw_gurumdds_cpp::convert_liveliness_lease_duration(liveliness),
+    false,
+  };
+
+  const uint32_t * const dp_gid_32_arr = reinterpret_cast<const uint32_t *>(dp_gid->data);
+  const uint32_t * const endp_gid_32_arr = reinterpret_cast<const uint32_t *>(endp_gid->data);
   RCUTILS_LOG_DEBUG_NAMED(
     RMW_GURUMDDS_ID,
     "[context_listener thread] assert endpoint: "
@@ -86,37 +79,37 @@ __add_entity(
     "local=%d",
     reinterpret_cast<void *>(ctx),
     reinterpret_cast<void *>(&ctx->common_ctx.graph_cache),
-    reinterpret_cast<const uint32_t *>(dp_gid->data)[0],
-    reinterpret_cast<const uint32_t *>(dp_gid->data)[1],
-    reinterpret_cast<const uint32_t *>(dp_gid->data)[2],
-    reinterpret_cast<const uint32_t *>(dp_gid->data)[3],
-    reinterpret_cast<const uint32_t *>(endp_gid->data)[0],
-    reinterpret_cast<const uint32_t *>(endp_gid->data)[1],
-    reinterpret_cast<const uint32_t *>(endp_gid->data)[2],
-    reinterpret_cast<const uint32_t *>(endp_gid->data)[3],
+    dp_gid_32_arr[0],
+    dp_gid_32_arr[1],
+    dp_gid_32_arr[2],
+    dp_gid_32_arr[3],
+    endp_gid_32_arr[0],
+    endp_gid_32_arr[1],
+    endp_gid_32_arr[2],
+    endp_gid_32_arr[3],
     topic_name,
     type_name,
     is_reader,
     local);
 
   if (!ctx->common_ctx.graph_cache.add_entity(
-      *endp_gid,
-      std::string(topic_name),
-      std::string(type_name),
-      *dp_gid,
-      qos_profile,
-      is_reader))
-  {
+    *endp_gid,
+    std::string(topic_name),
+    std::string(type_name),
+    type_hash,
+    *dp_gid,
+    qos_profile,
+    is_reader)) {
     RCUTILS_LOG_DEBUG_NAMED(
       RMW_GURUMDDS_ID,
       "failed to add entity to cache: "
       "gid=0x%08X.0x%08X.0x%08X.0x%08X, "
       "topic=%s, "
       "type=%s",
-      reinterpret_cast<const uint32_t *>(endp_gid->data)[0],
-      reinterpret_cast<const uint32_t *>(endp_gid->data)[1],
-      reinterpret_cast<const uint32_t *>(endp_gid->data)[2],
-      reinterpret_cast<const uint32_t *>(endp_gid->data)[3],
+      endp_gid_32_arr[0],
+      endp_gid_32_arr[1],
+      endp_gid_32_arr[2],
+      endp_gid_32_arr[3],
       topic_name,
       type_name);
     return RMW_RET_ERROR;
@@ -125,12 +118,10 @@ __add_entity(
   return RMW_RET_OK;
 }
 
-static rmw_ret_t
-__remove_entity(
+static rmw_ret_t remove_entity(
   rmw_context_impl_t * const ctx,
   const rmw_gid_t gid,
-  const bool is_reader)
-{
+  const bool is_reader) {
   if (!ctx->common_ctx.graph_cache.remove_entity(gid, is_reader)) {
     RMW_SET_ERROR_MSG("failed to remove entity from graph_cache");
     return RMW_RET_ERROR;
@@ -152,13 +143,12 @@ __remove_entity(
   return RMW_RET_OK;
 }
 
-static rmw_ret_t
-__add_local_publisher(
+static rmw_ret_t add_local_publisher(
   rmw_context_impl_t * const ctx,
   const rmw_node_t * const node,
   dds_DataWriter * const datawriter,
-  const rmw_gid_t gid)
-{
+  const rosidl_type_hash_s & type_hash,
+  const rmw_gid_t gid) {
   RCUTILS_LOG_DEBUG_NAMED(
     RMW_GURUMDDS_ID,
     "[graph] local publisher created: "
@@ -189,25 +179,24 @@ __add_local_publisher(
     return RMW_RET_ERROR;
   }
 
-  auto scope_exit_qos_reset = rcpputils::make_scope_exit(
-    [dw_qos_ptr]()
-    {
-      if (dds_RETCODE_OK != dds_DataWriterQos_finalize(dw_qos_ptr)) {
-        RMW_SET_ERROR_MSG("failed to finalize DataWriterQos");
-      }
-    });
+  auto scope_exit_qos_reset = rcpputils::make_scope_exit([dw_qos_ptr]() {
+    if (dds_RETCODE_OK != dds_DataWriterQos_finalize(dw_qos_ptr)) {
+      RMW_SET_ERROR_MSG("failed to finalize DataWriterQos");
+    }
+  });
 
   if (dds_RETCODE_OK != dds_DataWriter_get_qos(datawriter, &dw_qos)) {
     RMW_SET_ERROR_MSG("failed to get DataWriterQos");
     return RMW_RET_ERROR;
   }
 
-  return __add_entity(
+  return add_entity(
     ctx,
     &gid,
     &ctx->common_ctx.gid,
     topic_name,
     type_name,
+    type_hash,
     &dw_qos.history,
     &dw_qos.reliability,
     &dw_qos.durability,
@@ -218,21 +207,19 @@ __add_local_publisher(
     true);
 }
 
-static rmw_ret_t
-__add_local_subscriber(
+static rmw_ret_t add_local_subscriber(
   rmw_context_impl_t * const ctx,
   const rmw_node_t * const node,
   dds_DataReader * const datareader,
-  const rmw_gid_t gid)
-{
+  const rosidl_type_hash_s & type_hash,
+  const rmw_gid_t gid) {
   RCUTILS_LOG_DEBUG_NAMED(
     RMW_GURUMDDS_ID,
     "[graph] local subscriber created: "
     "node=%s::%s, "
     "dp_gid=%08X.%08X.%08X.%08X, "
     "gid=%08X.%08X.%08X.%08X",
-    node->namespace_,
-    node->name,
+    node->namespace_, node->name,
     reinterpret_cast<const uint32_t *>(ctx->common_ctx.gid.data)[0],
     reinterpret_cast<const uint32_t *>(ctx->common_ctx.gid.data)[1],
     reinterpret_cast<const uint32_t *>(ctx->common_ctx.gid.data)[2],
@@ -245,8 +232,7 @@ __add_local_subscriber(
   dds_DataReaderQos dr_qos;
   dds_DataReaderQos * dr_qos_ptr = &dr_qos;
 
-  dds_Topic * topic =
-    reinterpret_cast<dds_Topic *>(dds_DataReader_get_topicdescription(datareader));
+  dds_Topic * topic = reinterpret_cast<dds_Topic *>(dds_DataReader_get_topicdescription(datareader));
   const char * topic_name = dds_Topic_get_name(topic);
   const char * type_name = dds_Topic_get_type_name(topic);
 
@@ -256,25 +242,24 @@ __add_local_subscriber(
     return RMW_RET_ERROR;
   }
 
-  auto scope_exit_qos_reset = rcpputils::make_scope_exit(
-    [dr_qos_ptr]()
-    {
-      if (dds_RETCODE_OK != dds_DataReaderQos_finalize(dr_qos_ptr)) {
-        RMW_SET_ERROR_MSG("failed to finalize DataReaderQos");
-      }
-    });
+  auto scope_exit_qos_reset = rcpputils::make_scope_exit([dr_qos_ptr]() {
+    if (dds_RETCODE_OK != dds_DataReaderQos_finalize(dr_qos_ptr)) {
+      RMW_SET_ERROR_MSG("failed to finalize DataReaderQos");
+    }
+  });
 
   if (dds_RETCODE_OK != dds_DataReader_get_qos(datareader, &dr_qos)) {
     RMW_SET_ERROR_MSG("failed to get DataReaderQos");
     return RMW_RET_ERROR;
   }
 
-  return __add_entity(
+  return add_entity(
     ctx,
     &gid,
     &ctx->common_ctx.gid,
     topic_name,
     type_name,
+    type_hash,
     &dr_qos.history,
     &dr_qos.reliability,
     &dr_qos.durability,
@@ -285,13 +270,14 @@ __add_local_subscriber(
     true);
 }
 
+namespace rmw_gurumdds_cpp::graph_cache {
 rmw_ret_t
-graph_cache_initialize(rmw_context_impl_t * const ctx)
+initialize(rmw_context_impl_t * const ctx)
 {
   rmw_qos_profile_t qos = rmw_qos_profile_default;
   qos.avoid_ros_namespace_conventions = true;
   qos.history = RMW_QOS_POLICY_HISTORY_KEEP_LAST;
-  qos.depth = 1;
+  qos.depth = 100;
   qos.durability = RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL;
   qos.reliability = RMW_QOS_POLICY_RELIABILITY_RELIABLE;
 
@@ -308,7 +294,7 @@ graph_cache_initialize(rmw_context_impl_t * const ctx)
   const char * const topic_name_partinfo = "ros_discovery_info";
 
   ctx->common_ctx.pub =
-    __rmw_create_publisher(
+    rmw_gurumdds_cpp::create_publisher(
     ctx,
     nullptr,
     ctx->participant,
@@ -328,7 +314,7 @@ graph_cache_initialize(rmw_context_impl_t * const ctx)
   qos.history = RMW_QOS_POLICY_HISTORY_KEEP_ALL;
 
   ctx->common_ctx.sub =
-    __rmw_create_subscription(
+    create_subscription(
     ctx,
     nullptr,
     ctx->participant,
@@ -361,6 +347,14 @@ graph_cache_initialize(rmw_context_impl_t * const ctx)
       }
     });
 
+  ctx->common_ctx.publish_callback = [](const rmw_publisher_t * pub, const void * msg) {
+    return rmw_gurumdds_cpp::publish(
+      RMW_GURUMDDS_ID,
+      pub,
+      msg,
+      nullptr);
+  };
+
   entity_get_gid(reinterpret_cast<dds_Entity *>(ctx->participant), ctx->common_ctx.gid);
   std::string dp_enclave = ctx->base->options.enclave;
   ctx->common_ctx.graph_cache.add_participant(ctx->common_ctx.gid, dp_enclave);
@@ -369,9 +363,9 @@ graph_cache_initialize(rmw_context_impl_t * const ctx)
 }
 
 rmw_ret_t
-graph_cache_finalize(rmw_context_impl_t * const ctx)
+finalize(rmw_context_impl_t * const ctx)
 {
-  if (RMW_RET_OK != stop_listener_thread(ctx->base)) {
+  if (RMW_RET_OK != rmw_gurumdds_cpp::stop_listener_thread(ctx->base)) {
     RMW_SET_ERROR_MSG("failed to stop listener thread");
     return RMW_RET_ERROR;
   }
@@ -390,7 +384,7 @@ graph_cache_finalize(rmw_context_impl_t * const ctx)
 
   if (ctx->common_ctx.sub != nullptr) {
     if (RMW_RET_OK !=
-      __rmw_destroy_subscription(ctx, ctx->common_ctx.sub))
+      destroy_subscription(ctx, ctx->common_ctx.sub))
     {
       RMW_SET_ERROR_MSG("failed to destroy discovery subscriber");
       return RMW_RET_ERROR;
@@ -400,7 +394,7 @@ graph_cache_finalize(rmw_context_impl_t * const ctx)
 
   if (ctx->common_ctx.pub != nullptr) {
     if (RMW_RET_OK !=
-      __rmw_destroy_publisher(ctx, ctx->common_ctx.pub))
+      rmw_gurumdds_cpp::destroy_publisher(ctx, ctx->common_ctx.pub))
     {
       RMW_SET_ERROR_MSG("failed to destroy discovery publisher");
       return RMW_RET_ERROR;
@@ -412,9 +406,9 @@ graph_cache_finalize(rmw_context_impl_t * const ctx)
 }
 
 rmw_ret_t
-graph_enable(rmw_context_t * const ctx)
+enable(rmw_context_t * const ctx)
 {
-  if (run_listener_thread(ctx) != RMW_RET_OK) {
+  if (rmw_gurumdds_cpp::run_listener_thread(ctx) != RMW_RET_OK) {
     RMW_SET_ERROR_MSG("failed to start discovery listener thread");
     return RMW_RET_ERROR;
   }
@@ -423,7 +417,7 @@ graph_enable(rmw_context_t * const ctx)
 }
 
 rmw_ret_t
-graph_publish_update(
+publish_update(
   rmw_context_impl_t * const ctx,
   void * const msg)
 {
@@ -441,11 +435,16 @@ graph_publish_update(
 }
 
 rmw_ret_t
-graph_on_node_created(
+on_node_created(
   rmw_context_impl_t * const ctx,
   const rmw_node_t * const node)
 {
-  std::lock_guard<std::mutex> guard(ctx->common_ctx.node_update_mutex);
+  rmw_ret_t rc = ctx->common_ctx.add_node_graph(
+    node->name, node->namespace_);
+  if (RMW_RET_OK != rc) {
+    RMW_SET_ERROR_MSG("failed to add node graph");
+    return RMW_RET_ERROR;
+  }
 
   RCUTILS_LOG_DEBUG_NAMED(
     RMW_GURUMDDS_ID,
@@ -459,29 +458,18 @@ graph_on_node_created(
     reinterpret_cast<const uint32_t *>(ctx->common_ctx.gid.data)[2],
     reinterpret_cast<const uint32_t *>(ctx->common_ctx.gid.data)[3]);
 
-  rmw_dds_common::msg::ParticipantEntitiesInfo msg =
-    ctx->common_ctx.graph_cache.add_node(ctx->common_ctx.gid, node->name, node->namespace_);
-
-  if (graph_publish_update(ctx, reinterpret_cast<void *>(&msg)) != RMW_RET_OK) {
-    static_cast<void>(ctx->common_ctx.graph_cache.remove_node(
-      ctx->common_ctx.gid, node->name, node->namespace_));
-    return RMW_RET_ERROR;
-  }
-
   return RMW_RET_OK;
 }
 
 rmw_ret_t
-graph_on_node_deleted(
+on_node_deleted(
   rmw_context_impl_t * const ctx,
   const rmw_node_t * const node)
 {
-  std::lock_guard<std::mutex> guard(ctx->common_ctx.node_update_mutex);
-
-  rmw_dds_common::msg::ParticipantEntitiesInfo msg =
-    ctx->common_ctx.graph_cache.remove_node(ctx->common_ctx.gid, node->name, node->namespace_);
-
-  if (graph_publish_update(ctx, reinterpret_cast<void *>(&msg)) != RMW_RET_OK) {
+  rmw_ret_t rc = ctx->common_ctx.remove_node_graph(
+    node->name, node->namespace_);
+  if (RMW_RET_OK != rc) {
+    RMW_SET_ERROR_MSG("failed to remove node graph");
     return RMW_RET_ERROR;
   }
 
@@ -489,31 +477,23 @@ graph_on_node_deleted(
 }
 
 rmw_ret_t
-graph_on_publisher_created(
+on_publisher_created(
   rmw_context_impl_t * const ctx,
   const rmw_node_t * const node,
-  GurumddsPublisherInfo * const pub)
+  PublisherInfo * const pub)
 {
-  std::lock_guard<std::mutex> guard(ctx->common_ctx.node_update_mutex);
-
-  if (__add_local_publisher(ctx, node, pub->topic_writer, pub->publisher_gid) != RMW_RET_OK) {
+  const rosidl_type_hash_s& type_hash = *pub->rosidl_message_typesupport->get_type_hash_func(pub->rosidl_message_typesupport);
+  rmw_ret_t rc = add_local_publisher(ctx, node, pub->topic_writer, type_hash, pub->publisher_gid);
+  if (RMW_RET_OK != rc) {
+    RMW_SET_ERROR_MSG("failed to add local publisher");
     return RMW_RET_ERROR;
   }
 
-  rmw_dds_common::msg::ParticipantEntitiesInfo msg =
-    ctx->common_ctx.graph_cache.associate_writer(
-    pub->publisher_gid,
-    ctx->common_ctx.gid,
-    node->name,
-    node->namespace_);
-
-  if (graph_publish_update(ctx, reinterpret_cast<void *>(&msg)) != RMW_RET_OK) {
-    __remove_entity(ctx, pub->publisher_gid, false);
-    static_cast<void>(ctx->common_ctx.graph_cache.dissociate_writer(
-      pub->publisher_gid,
-      ctx->common_ctx.gid,
-      node->name,
-      node->namespace_));
+  rc = ctx->common_ctx.add_publisher_graph(
+    pub->publisher_gid, node->name, node->namespace_);
+  if (RMW_RET_OK != rc) {
+    RMW_SET_ERROR_MSG("failed to add publisher graph");
+    remove_entity(ctx, pub->publisher_gid, false);
     return RMW_RET_ERROR;
   }
 
@@ -521,59 +501,21 @@ graph_on_publisher_created(
 }
 
 rmw_ret_t
-graph_on_publisher_deleted(
+on_publisher_deleted(
   rmw_context_impl_t * const ctx,
   const rmw_node_t * const node,
-  GurumddsPublisherInfo * const pub)
+  PublisherInfo * const pub)
 {
-  bool failed = false;
-  std::lock_guard<std::mutex> guard(ctx->common_ctx.node_update_mutex);
-
-  if (__remove_entity(ctx, pub->publisher_gid, false) != RMW_RET_OK) {
-    RMW_SET_ERROR_MSG("failed to remove publisher from graph_cache");
-    failed = true;
-  }
-
-  rmw_dds_common::msg::ParticipantEntitiesInfo msg =
-    ctx->common_ctx.graph_cache.dissociate_writer(
-    pub->publisher_gid,
-    ctx->common_ctx.gid,
-    node->name,
-    node->namespace_);
-
-  if (graph_publish_update(ctx, reinterpret_cast<void *>(&msg)) != RMW_RET_OK) {
+  rmw_ret_t rc = remove_entity(ctx, pub->publisher_gid, false);
+  if (RMW_RET_OK != rc) {
+    RMW_SET_ERROR_MSG("failed to remove entity of publisher");
     return RMW_RET_ERROR;
   }
 
-  return failed ? RMW_RET_ERROR : RMW_RET_OK;
-}
-
-rmw_ret_t
-graph_on_subscriber_created(
-  rmw_context_impl_t * const ctx,
-  const rmw_node_t * const node,
-  GurumddsSubscriberInfo * const sub)
-{
-  std::lock_guard<std::mutex> guard(ctx->common_ctx.node_update_mutex);
-
-  if (__add_local_subscriber(ctx, node, sub->topic_reader, sub->subscriber_gid) != RMW_RET_OK) {
-    return RMW_RET_ERROR;
-  }
-
-  rmw_dds_common::msg::ParticipantEntitiesInfo msg =
-    ctx->common_ctx.graph_cache.associate_reader(
-    sub->subscriber_gid,
-    ctx->common_ctx.gid,
-    node->name,
-    node->namespace_);
-
-  if (graph_publish_update(ctx, reinterpret_cast<void *>(&msg)) != RMW_RET_OK) {
-    __remove_entity(ctx, sub->subscriber_gid, true);
-    static_cast<void>(ctx->common_ctx.graph_cache.dissociate_reader(
-      sub->subscriber_gid,
-      ctx->common_ctx.gid,
-      node->name,
-      node->namespace_));
+  rc = ctx->common_ctx.remove_publisher_graph(
+    pub->publisher_gid, node->name, node->namespace_);
+  if (RMW_RET_OK != rc) {
+    RMW_SET_ERROR_MSG("failed to remove remove publisher graph");
     return RMW_RET_ERROR;
   }
 
@@ -581,41 +523,58 @@ graph_on_subscriber_created(
 }
 
 rmw_ret_t
-graph_on_subscriber_deleted(
+on_subscriber_created(
   rmw_context_impl_t * const ctx,
   const rmw_node_t * const node,
-  GurumddsSubscriberInfo * const sub)
+  SubscriberInfo * const sub)
 {
-  bool failed = false;
-  std::lock_guard<std::mutex> guard(ctx->common_ctx.node_update_mutex);
-
-  if (__remove_entity(ctx, sub->subscriber_gid, true) != RMW_RET_OK) {
-    RMW_SET_ERROR_MSG("failed to remove subscriber from graph_cache");
-    failed = true;
-  }
-
-  rmw_dds_common::msg::ParticipantEntitiesInfo msg =
-    ctx->common_ctx.graph_cache.dissociate_reader(
-    sub->subscriber_gid,
-    ctx->common_ctx.gid,
-    node->name,
-    node->namespace_);
-
-  if (graph_publish_update(ctx, reinterpret_cast<void *>(&msg)) != RMW_RET_OK) {
+  const rosidl_type_hash_s& type_hash = *sub->rosidl_message_typesupport->get_type_hash_func(sub->rosidl_message_typesupport);
+  rmw_ret_t rc = add_local_subscriber(ctx, node, sub->topic_reader, type_hash, sub->subscriber_gid);
+  if (RMW_RET_OK != rc) {
+    RMW_SET_ERROR_MSG("failed to add local subscriber");
+    remove_entity(ctx, sub->subscriber_gid, true);
     return RMW_RET_ERROR;
   }
 
-  return failed ? RMW_RET_ERROR : RMW_RET_OK;
+  rc = ctx->common_ctx.add_subscriber_graph(
+    sub->subscriber_gid, node->name, node->namespace_);
+  if (RMW_RET_OK != rc) {
+    RMW_SET_ERROR_MSG("failed to add subscriber graph");
+    remove_entity(ctx, sub->subscriber_gid, false);
+    return RMW_RET_ERROR;
+  }
+
+  return RMW_RET_OK;
 }
 
 rmw_ret_t
-graph_on_service_created(
+on_subscriber_deleted(
   rmw_context_impl_t * const ctx,
   const rmw_node_t * const node,
-  GurumddsServiceInfo * const svc)
+  SubscriberInfo * const sub)
 {
-  std::lock_guard<std::mutex> guard(ctx->common_ctx.node_update_mutex);
+  rmw_ret_t rc = remove_entity(ctx, sub->subscriber_gid, true);
+  if (RMW_RET_OK != rc) {
+    RMW_SET_ERROR_MSG("failed to remove entity of subscriber");
+    return RMW_RET_ERROR;
+  }
 
+  rc = ctx->common_ctx.remove_subscriber_graph(
+    sub->subscriber_gid, node->name, node->namespace_);
+  if (RMW_RET_OK != rc) {
+    RMW_SET_ERROR_MSG("failed to remove remove subscriber graph");
+    return RMW_RET_ERROR;
+  }
+
+  return RMW_RET_OK;
+}
+
+rmw_ret_t
+on_service_created(
+  rmw_context_impl_t * const ctx,
+  const rmw_node_t * const node,
+  ServiceInfo * const svc)
+{
   const rmw_gid_t pub_gid = svc->publisher_gid;
   const rmw_gid_t sub_gid = svc->subscriber_gid;
   bool add_pub = false;
@@ -625,102 +584,68 @@ graph_on_service_created(
     [ctx, pub_gid, sub_gid, add_sub, add_pub]()
     {
       if (add_sub) {
-        __remove_entity(ctx, sub_gid, true);
+        remove_entity(ctx, sub_gid, true);
       }
       if (add_pub) {
-        __remove_entity(ctx, pub_gid, false);
+        remove_entity(ctx, pub_gid, false);
       }
     });
 
-  if (__add_local_subscriber(ctx, node, svc->request_reader, sub_gid) != RMW_RET_OK) {
+  const rosidl_message_type_support_t* type_support;
+  const rosidl_type_hash_s* type_hash;
+  type_support = svc->service_typesupport->request_typesupport;
+  type_hash = type_support->get_type_hash_func(type_support);
+  if (RMW_RET_OK != add_local_subscriber(ctx, node, svc->request_reader, *type_hash,  sub_gid)) {
+    RMW_SET_ERROR_MSG("failed to add local subscriber");
     return RMW_RET_ERROR;
   }
+  add_sub = true;
 
-  if (__add_local_publisher(ctx, node, svc->response_writer, pub_gid) != RMW_RET_OK) {
+  type_support = svc->service_typesupport->response_typesupport;
+  type_hash = type_support->get_type_hash_func(type_support);
+  if (RMW_RET_OK != add_local_publisher(ctx, node, svc->response_writer, *type_hash, pub_gid)) {
+    RMW_SET_ERROR_MSG("failed to add local publisher");
     return RMW_RET_ERROR;
   }
+  add_pub = true;
 
-  ctx->common_ctx.graph_cache.associate_writer(
-    pub_gid,
-    ctx->common_ctx.gid,
-    node->name,
-    node->namespace_);
-
-  rmw_dds_common::msg::ParticipantEntitiesInfo msg =
-    ctx->common_ctx.graph_cache.associate_reader(
-    sub_gid,
-    ctx->common_ctx.gid,
-    node->name,
-    node->namespace_);
-
-  if (graph_publish_update(ctx, reinterpret_cast<void *>(&msg)) != RMW_RET_OK) {
-    ctx->common_ctx.graph_cache.dissociate_writer(
-      pub_gid,
-      ctx->common_ctx.gid,
-      node->name,
-      node->namespace_);
-
-    ctx->common_ctx.graph_cache.dissociate_reader(
-      sub_gid,
-      ctx->common_ctx.gid,
-      node->name,
-      node->namespace_);
-
+  if(RMW_RET_OK != ctx->common_ctx.add_service_graph(
+    sub_gid, pub_gid, node->name, node->namespace_)) {
+    RMW_SET_ERROR_MSG("failed to add service graph");
     return RMW_RET_ERROR;
   }
 
   scope_exit_entities_reset.cancel();
-
   return RMW_RET_OK;
 }
 
 rmw_ret_t
-graph_on_service_deleted(
+on_service_deleted(
   rmw_context_impl_t * const ctx,
   const rmw_node_t * const node,
-  GurumddsServiceInfo * const svc)
+  ServiceInfo * const svc)
 {
-  std::lock_guard<std::mutex> guard(ctx->common_ctx.node_update_mutex);
   bool failed = false;
-
-  rmw_ret_t rc = __remove_entity(
-    ctx,
-    svc->subscriber_gid,
-    true);
+  rmw_ret_t rc = remove_entity(ctx, svc->subscriber_gid, true);
   failed = failed && (RMW_RET_OK == rc);
 
-  rc = __remove_entity(
-    ctx,
-    svc->publisher_gid,
-    false);
+  rc = remove_entity(ctx, svc->publisher_gid, false);
   failed = failed && (RMW_RET_OK == rc);
 
-  ctx->common_ctx.graph_cache.dissociate_writer(
-    svc->publisher_gid,
-    ctx->common_ctx.gid,
-    node->name,
-    node->namespace_);
-
-  rmw_dds_common::msg::ParticipantEntitiesInfo msg =
-    ctx->common_ctx.graph_cache.dissociate_reader(
-    svc->subscriber_gid,
-    ctx->common_ctx.gid,
-    node->name,
-    node->namespace_);
-
-  rc = graph_publish_update(ctx, reinterpret_cast<void *>(&msg));
+  rc = ctx->common_ctx.remove_service_graph(
+    svc->subscriber_gid, svc->publisher_gid, node->name, node->namespace_
+  );
   failed = failed && (RMW_RET_OK == rc);
 
   return failed ? RMW_RET_ERROR : RMW_RET_OK;
 }
 
 rmw_ret_t
-graph_on_client_created(
+on_client_created(
   rmw_context_impl_t * const ctx,
   const rmw_node_t * const node,
-  GurumddsClientInfo * const client)
+  ClientInfo * const client)
 {
-  std::lock_guard<std::mutex> guard(ctx->common_ctx.node_update_mutex);
   const rmw_gid_t pub_gid = client->publisher_gid;
   const rmw_gid_t sub_gid = client->subscriber_gid;
   bool add_pub = false;
@@ -730,107 +655,74 @@ graph_on_client_created(
     [ctx, pub_gid, sub_gid, add_sub, add_pub]()
     {
       if (add_sub) {
-        __remove_entity(ctx, sub_gid, true);
+        remove_entity(ctx, sub_gid, true);
       }
       if (add_pub) {
-        __remove_entity(ctx, pub_gid, false);
+        remove_entity(ctx, pub_gid, false);
       }
     });
 
-  if (__add_local_subscriber(ctx, node, client->response_reader, sub_gid) != RMW_RET_OK) {
+  const rosidl_message_type_support_t* type_support;
+  const rosidl_type_hash_s* type_hash;
+  type_support = client->service_typesupport->response_typesupport;
+  type_hash = type_support->get_type_hash_func(type_support);
+  if (RMW_RET_OK != add_local_subscriber(ctx, node, client->response_reader, *type_hash, sub_gid)) {
+    RMW_SET_ERROR_MSG("failed to add local subscriber");
     return RMW_RET_ERROR;
   }
+  add_sub = true;
 
-  if (__add_local_publisher(ctx, node, client->request_writer, pub_gid) != RMW_RET_OK) {
+  type_support = client->service_typesupport->request_typesupport;
+  type_hash = type_support->get_type_hash_func(type_support);
+  if (RMW_RET_OK != add_local_publisher(ctx, node, client->request_writer, *type_hash, pub_gid)) {
+    RMW_SET_ERROR_MSG("failed to add local publisher");
     return RMW_RET_ERROR;
   }
+  add_pub = true;
 
-  ctx->common_ctx.graph_cache.associate_writer(
-    pub_gid,
-    ctx->common_ctx.gid,
-    node->name,
-    node->namespace_);
-
-  rmw_dds_common::msg::ParticipantEntitiesInfo msg =
-    ctx->common_ctx.graph_cache.associate_reader(
-    sub_gid,
-    ctx->common_ctx.gid,
-    node->name,
-    node->namespace_);
-
-  if (graph_publish_update(ctx, reinterpret_cast<void *>(&msg)) != RMW_RET_OK) {
-    ctx->common_ctx.graph_cache.dissociate_writer(
-      pub_gid,
-      ctx->common_ctx.gid,
-      node->name,
-      node->namespace_);
-
-    ctx->common_ctx.graph_cache.dissociate_reader(
-      sub_gid,
-      ctx->common_ctx.gid,
-      node->name,
-      node->namespace_);
+  if(RMW_RET_OK != ctx->common_ctx.add_client_graph(pub_gid, sub_gid, node->name, node->namespace_)) {
+    RMW_SET_ERROR_MSG("failed to add client graph");
     return RMW_RET_ERROR;
   }
 
   scope_exit_entities_reset.cancel();
-
   return RMW_RET_OK;
 }
 
 rmw_ret_t
-graph_on_client_deleted(
+on_client_deleted(
   rmw_context_impl_t * const ctx,
   const rmw_node_t * const node,
-  GurumddsClientInfo * const client)
+  ClientInfo * const client)
 {
-  std::lock_guard<std::mutex> guard(ctx->common_ctx.node_update_mutex);
   bool failed = false;
-
-  rmw_ret_t rc = __remove_entity(
-    ctx,
-    client->subscriber_gid,
-    true);
+  rmw_ret_t rc = remove_entity(ctx, client->subscriber_gid, true);
   failed = failed && (RMW_RET_OK == rc);
 
-  rc = __remove_entity(
-    ctx,
-    client->publisher_gid,
-    false);
+  rc = remove_entity(ctx, client->publisher_gid, false);
   failed = failed && (RMW_RET_OK == rc);
 
-  ctx->common_ctx.graph_cache.dissociate_writer(
-    client->publisher_gid,
-    ctx->common_ctx.gid,
-    node->name,
-    node->namespace_);
-
-  rmw_dds_common::msg::ParticipantEntitiesInfo msg =
-    ctx->common_ctx.graph_cache.dissociate_reader(
-    client->subscriber_gid,
-    ctx->common_ctx.gid,
-    node->name,
-    node->namespace_);
-
-  rc = graph_publish_update(ctx, reinterpret_cast<void *>(&msg));
+  rc = ctx->common_ctx.remove_service_graph(
+    client->subscriber_gid, client->publisher_gid, node->name, node->namespace_
+  );
   failed = failed && (RMW_RET_OK == rc);
 
   return failed ? RMW_RET_ERROR : RMW_RET_OK;
 }
 
 rmw_ret_t
-graph_on_participant_info(rmw_context_impl_t * ctx)
+on_participant_info(rmw_context_impl_t * ctx)
 {
   bool taken = false;
   rmw_dds_common::msg::ParticipantEntitiesInfo msg;
 
   do {
-    if (rmw_take(ctx->common_ctx.sub, &msg, &taken, nullptr) != RMW_RET_OK) {
+    if (RMW_RET_OK != rmw_take(ctx->common_ctx.sub, &msg, &taken, nullptr)) {
       RMW_SET_ERROR_MSG("failed to take discovery sample");
       return RMW_RET_ERROR;
     }
     if (taken) {
-      if (memcmp(&msg.gid.data, ctx->common_ctx.gid.data, RMW_GID_STORAGE_SIZE) == 0) {
+      if (std::memcmp(&msg.gid.data, ctx->common_ctx.gid.data, RMW_GID_STORAGE_SIZE) == 0) {
         continue;
       }
 
@@ -843,7 +735,6 @@ graph_on_participant_info(rmw_context_impl_t * ctx)
         reinterpret_cast<const uint32_t *>(&msg.gid.data)[2],
         reinterpret_cast<const uint32_t *>(&msg.gid.data)[3]);
 
-      std::lock_guard<std::mutex> guard(ctx->common_ctx.node_update_mutex);
       ctx->common_ctx.graph_cache.update_participant_entities(msg);
     }
   } while (taken);
@@ -852,16 +743,16 @@ graph_on_participant_info(rmw_context_impl_t * ctx)
 }
 
 rmw_ret_t
-graph_add_participant(
+add_participant(
   rmw_context_impl_t * const ctx,
   const dds_GUID_t * const dp_guid,
   const char * const enclave)
 {
   rmw_gid_t gid;
-  guid_to_gid(*dp_guid, gid);
+  rmw_gurumdds_cpp::guid_to_gid(*dp_guid, gid);
 
-  if (memcmp(gid.data, ctx->common_ctx.gid.data, RMW_GID_STORAGE_SIZE) == 0) {
-    /* Ignore own announcements */
+  if (0 == std::memcmp(gid.data, ctx->common_ctx.gid.data, RMW_GID_STORAGE_SIZE)) {
+    // Ignore own announcements
     return RMW_RET_OK;
   }
 
@@ -870,38 +761,37 @@ graph_add_participant(
     enclave_str = enclave;
   }
 
-  std::lock_guard<std::mutex> guard(ctx->common_ctx.node_update_mutex);
   ctx->common_ctx.graph_cache.add_participant(gid, enclave_str);
 
   return RMW_RET_OK;
 }
 
 rmw_ret_t
-graph_remove_participant(
+remove_participant(
   rmw_context_impl_t * const ctx,
   const dds_GUID_t * const dp_guid)
 {
   rmw_gid_t gid;
-  guid_to_gid(*dp_guid, gid);
+  rmw_gurumdds_cpp::guid_to_gid(*dp_guid, gid);
 
-  if (memcmp(gid.data, ctx->common_ctx.gid.data, RMW_GID_STORAGE_SIZE) == 0) {
-    /* Ignore own announcements */
+  if (0 == std::memcmp(gid.data, ctx->common_ctx.gid.data, RMW_GID_STORAGE_SIZE)) {
+    // Ignore own announcements
     return RMW_RET_OK;
   }
 
-  std::lock_guard<std::mutex> guard(ctx->common_ctx.node_update_mutex);
   ctx->common_ctx.graph_cache.remove_participant(gid);
 
   return RMW_RET_OK;
 }
 
 rmw_ret_t
-graph_add_remote_entity(
+add_remote_entity(
   rmw_context_impl_t * ctx,
   const dds_GUID_t * const endp_guid,
   const dds_GUID_t * const dp_guid,
   const char * const topic_name,
   const char * const type_name,
+  const dds_UserDataQosPolicy& user_data,
   const dds_ReliabilityQosPolicy * const reliability,
   const dds_DurabilityQosPolicy * const durability,
   const dds_DeadlineQosPolicy * const deadline,
@@ -909,23 +799,29 @@ graph_add_remote_entity(
   const dds_LifespanQosPolicy * const lifespan,
   const bool is_reader)
 {
-  std::lock_guard<std::mutex> guard(ctx->common_ctx.node_update_mutex);
-
   rmw_gid_t endp_gid, dp_gid;
-  guid_to_gid(*endp_guid, endp_gid);
-  guid_to_gid(*dp_guid, dp_gid);
+  rmw_gurumdds_cpp::guid_to_gid(*endp_guid, endp_gid);
+  rmw_gurumdds_cpp::guid_to_gid(*dp_guid, dp_gid);
 
-  if (memcmp(dp_gid.data, ctx->common_ctx.gid.data, RMW_GID_STORAGE_SIZE) == 0) {
-    /* Ignore own announcements */
+  if (0 == std::memcmp(dp_gid.data, ctx->common_ctx.gid.data, RMW_GID_STORAGE_SIZE)) {
+    // Ignore own announcements
     return RMW_RET_OK;
   }
 
-  if (RMW_RET_OK != __add_entity(
+  rosidl_type_hash_s type_hash;
+  if(RMW_RET_OK != rmw_dds_common::parse_type_hash_from_user_data(
+    user_data.value, user_data.size, type_hash)) {
+    type_hash = rosidl_get_zero_initialized_type_hash();
+    rmw_reset_error();
+  }
+
+  if (RMW_RET_OK != add_entity(
       ctx,
       &endp_gid,
       &dp_gid,
       topic_name,
       type_name,
+      type_hash,
       nullptr,
       reliability,
       durability,
@@ -942,19 +838,21 @@ graph_add_remote_entity(
 }
 
 rmw_ret_t
-graph_remove_entity(
+remove_entity(
   rmw_context_impl_t * const ctx,
   const dds_GUID_t * const guid,
   const bool is_reader)
 {
   rmw_gid_t gid;
-  guid_to_gid(*guid, gid);
+  rmw_gurumdds_cpp::guid_to_gid(*guid, gid);
 
-  if (memcmp(gid.data, ctx->common_ctx.gid.data, 12) == 0) {
-    /* Ignore own announcements */
+  if (0 == std::memcmp(gid.data, ctx->common_ctx.gid.data, 12)) {
+    // compare entities' GUID prefixes to determine whether they belong to the same participat
+    // (hence 12 instead of 16 bytes)
+    // Ignore own announcements
     return RMW_RET_OK;
   }
 
-  std::lock_guard<std::mutex> guard(ctx->common_ctx.node_update_mutex);
-  return __remove_entity(ctx, gid, is_reader);
+  return remove_entity(ctx, gid, is_reader);
 }
+} // namespace rmw_gurumdds_cpp::graph_cache

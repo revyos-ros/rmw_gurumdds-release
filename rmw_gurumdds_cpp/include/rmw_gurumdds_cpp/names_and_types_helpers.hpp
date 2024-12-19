@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef RMW_GURUMDDS_CPP__NAMES_AND_TYPES_HELPERS_HPP_
-#define RMW_GURUMDDS_CPP__NAMES_AND_TYPES_HELPERS_HPP_
+#ifndef RMW_GURUMDDS__NAMES_AND_TYPES_HELPERS_HPP_
+#define RMW_GURUMDDS__NAMES_AND_TYPES_HELPERS_HPP_
 
 #include <map>
 #include <set>
@@ -26,6 +26,8 @@
 #include "rmw/names_and_types.h"
 #include "rmw/rmw.h"
 
+namespace rmw_gurumdds_cpp
+{
 rmw_ret_t
 copy_services_to_names_and_types(
   const std::map<std::string, std::set<std::string>> & services,
@@ -53,5 +55,6 @@ create_topic_name(
   const char * topic_name,
   const char * suffix,
   const rmw_qos_profile_t * qos_policies);
+} // namespace rmw_gurumdds_cpp
 
-#endif  // RMW_GURUMDDS_CPP__NAMES_AND_TYPES_HELPERS_HPP_
+#endif // RMW_GURUMDDS__NAMES_AND_TYPES_HELPERS_HPP_

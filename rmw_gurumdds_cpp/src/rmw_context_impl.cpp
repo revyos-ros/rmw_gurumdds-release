@@ -12,38 +12,235 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <cassert>
-#include <memory>
+#include <cstdint>
+#include <cstring>
+#include <map>
 #include <string>
+#include <vector>
 
-#include "rcpputils/scope_exit.hpp"
+#include "rmw/impl/cpp/key_value.hpp"
 
-#include "rcutils/logging_macros.h"
-#include "rcutils/types.h"
-
-#include "rmw/allocators.h"
-#include "rmw/rmw.h"
-#include "rmw/types.h"
-
-#include "rmw_gurumdds_cpp/graph_cache.hpp"
+#include "rmw_gurumdds_cpp/gid.hpp"
 #include "rmw_gurumdds_cpp/rmw_context_impl.hpp"
-
-#include "rosidl_typesupport_cpp/message_type_support.hpp"
 
 using rmw_dds_common::msg::ParticipantEntitiesInfo;
 
+namespace rmw_gurumdds_cpp
+{
+static inline std::map<std::string, std::vector<uint8_t>>
+parse_map(uint8_t * const data, const uint32_t data_len)
+{
+  std::vector<uint8_t> data_vec(data, data + data_len);
+  std::map<std::string, std::vector<uint8_t>> map
+    = rmw::impl::cpp::parse_key_value(data_vec);
+  return map;
+}
+
+static inline rmw_ret_t
+get_user_data_key(
+  dds_ParticipantBuiltinTopicData * data,
+  const std::string& key,
+  std::string & value,
+  bool & found)
+{
+  found = false;
+  uint8_t * user_data =
+    static_cast<uint8_t *>(data->user_data.value);
+  const uint32_t user_data_len = data->user_data.size;
+  if (user_data_len == 0) {
+    return RMW_RET_OK;
+  }
+
+  auto map = parse_map(user_data, user_data_len);
+  auto name_found = map.find(key);
+  if (name_found != map.end()) {
+    value = std::string(name_found->second.begin(), name_found->second.end());
+    found = true;
+  }
+
+  return RMW_RET_OK;
+}
+
+void on_participant_changed(
+  const dds_DomainParticipant * a_participant,
+  const dds_ParticipantBuiltinTopicData * data,
+  dds_InstanceHandle_t handle)
+{
+  auto * participant = const_cast<dds_DomainParticipant *>(a_participant);
+  auto * ctx = reinterpret_cast<rmw_context_impl_t *>(
+    dds_Entity_get_context(reinterpret_cast<dds_Entity *>(participant), 0)
+  );
+  if (ctx == nullptr) {
+    return;
+  }
+
+  rmw_gurumdds_cpp::Guid_t dp_guid{*data};
+  if (handle == dds_HANDLE_NIL) {
+    rmw_gurumdds_cpp::graph_cache::remove_participant(ctx, &dp_guid);
+  } else {
+    std::string enclave_str;
+    bool enclave_found;
+    dds_ReturnCode_t rc =
+      get_user_data_key(
+      const_cast<dds_ParticipantBuiltinTopicData *>(data),
+      "securitycontext", enclave_str, enclave_found);
+    if (RMW_RET_OK != rc) {
+      RMW_SET_ERROR_MSG("failed to parse user data for enclave");
+    }
+
+    const char * enclave = nullptr;
+    if (enclave_found) {
+      enclave = enclave_str.c_str();
+    }
+
+    if (RMW_RET_OK != rmw_gurumdds_cpp::graph_cache::add_participant(ctx, &dp_guid, enclave)) {
+      RMW_SET_ERROR_MSG("failed to assert remote participant in graph");
+    }
+  }
+}
+
+void on_publication_changed(
+  const dds_DomainParticipant * a_participant,
+  const dds_PublicationBuiltinTopicData * data,
+  dds_InstanceHandle_t handle)
+{
+  auto * participant = const_cast<dds_DomainParticipant *>(a_participant);
+  auto * ctx = reinterpret_cast<rmw_context_impl_t *>(
+    dds_Entity_get_context(reinterpret_cast<dds_Entity *>(participant), 0)
+  );
+  if (ctx == nullptr) {
+    return;
+  }
+
+  rmw_gurumdds_cpp::Guid_t dp_guid = rmw_gurumdds_cpp::Guid_t::for_participant(*data);
+  rmw_gurumdds_cpp::Guid_t endp_guid{*data};
+  const auto * dp_guid_prefix = reinterpret_cast<const uint32_t *>(dp_guid.prefix);
+  const auto * endp_guid_prefix = reinterpret_cast<const uint32_t *>(endp_guid.prefix);
+  if (handle == dds_HANDLE_NIL) {
+    RCUTILS_LOG_DEBUG_NAMED(
+      "pub on data available",
+      "[ud] endp_gid=0x%08X.0x%08X.0x%08X.0x%08X ",
+      endp_guid_prefix[0],
+      endp_guid_prefix[1],
+      endp_guid_prefix[2],
+      endp_guid.entityId);
+    rmw_gurumdds_cpp::graph_cache::remove_entity(ctx, &endp_guid, false);
+  } else {
+    rmw_gurumdds_cpp::graph_cache::add_remote_entity(
+      ctx,
+      &endp_guid,
+      &dp_guid,
+      data->topic_name,
+      data->type_name,
+      data->user_data,
+      &data->reliability,
+      &data->durability,
+      &data->deadline,
+      &data->liveliness,
+      &data->lifespan,
+      false);
+    RCUTILS_LOG_DEBUG_NAMED(
+      "pub on data available",
+      "dp_gid=0x%08X.0x%08X.0x%08X.0x%08X, "
+      "gid=0x%08X.0x%08X.0x%08X.0x%08X, ",
+      dp_guid_prefix[0],
+      dp_guid_prefix[1],
+      dp_guid_prefix[2],
+      dp_guid.entityId,
+      endp_guid_prefix[0],
+      endp_guid_prefix[1],
+      endp_guid_prefix[2],
+      endp_guid.entityId);
+  }
+}
+
+void on_subscription_changed(
+  const dds_DomainParticipant * a_participant,
+  const dds_SubscriptionBuiltinTopicData * data,
+  dds_InstanceHandle_t handle)
+{
+  auto * participant = const_cast<dds_DomainParticipant *>(a_participant);
+  auto * ctx = reinterpret_cast<rmw_context_impl_t *>(
+    dds_Entity_get_context(reinterpret_cast<dds_Entity *>(participant), 0)
+  );
+  if (ctx == nullptr) {
+    return;
+  }
+
+  rmw_gurumdds_cpp::Guid_t dp_guid = rmw_gurumdds_cpp::Guid_t::for_participant(*data);
+  rmw_gurumdds_cpp::Guid_t endp_guid{*data};
+  const auto * dp_guid_prefix = reinterpret_cast<const uint32_t *>(dp_guid.prefix);
+  const auto * endp_guid_prefix = reinterpret_cast<const uint32_t *>(endp_guid.prefix);
+  if (handle == dds_HANDLE_NIL) {
+    RCUTILS_LOG_DEBUG_NAMED(
+      "sub on data available",
+      "[ud] endp_gid=0x%08X.0x%08X.0x%08X.0x%08X ",
+      endp_guid_prefix[0],
+      endp_guid_prefix[1],
+      endp_guid_prefix[2],
+      endp_guid.entityId);
+    rmw_gurumdds_cpp::graph_cache::remove_entity(ctx, &endp_guid, false);
+  } else {
+    rmw_gurumdds_cpp::graph_cache::add_remote_entity(
+      ctx,
+      &endp_guid,
+      &dp_guid,
+      data->topic_name,
+      data->type_name,
+      data->user_data,
+      &data->reliability,
+      &data->durability,
+      &data->deadline,
+      &data->liveliness,
+      nullptr,
+      true);
+    RCUTILS_LOG_DEBUG_NAMED(
+      "sub on data available",
+      "dp_gid=0x%08X.0x%08X.0x%08X.0x%08X, "
+      "gid=0x%08X.0x%08X.0x%08X.0x%08X, ",
+      dp_guid_prefix[0],
+      dp_guid_prefix[1],
+      dp_guid_prefix[2],
+      dp_guid.entityId,
+      endp_guid_prefix[0],
+      endp_guid_prefix[1],
+      endp_guid_prefix[2],
+      endp_guid.entityId);
+  }
+}
+} // namespace rmw_gurumdds_cpp
+
+rmw_context_impl_s::rmw_context_impl_s(rmw_context_t* const base)
+  : common_ctx(),
+  base(base),
+  domain_id(base->actual_domain_id),
+  participant(nullptr),
+  publisher(nullptr),
+  subscriber(nullptr),
+  localhost_only(base->options.localhost_only == RMW_LOCALHOST_ONLY_ENABLED)
+{
+  /* destructor relies on these being initialized properly */
+  common_ctx.thread_is_running.store(false);
+  common_ctx.graph_guard_condition = nullptr;
+  common_ctx.pub = nullptr;
+  common_ctx.sub = nullptr;
+}
+
+rmw_context_impl_s::~rmw_context_impl_s()
+{
+  if (0u != this->node_count) {
+    RCUTILS_LOG_ERROR_NAMED(RMW_GURUMDDS_ID, "not all nodes finalized: %lu", this->node_count);
+  }
+}
+
 rmw_ret_t
-rmw_context_impl_t::initialize_node(
+rmw_context_impl_s::initialize_node(
   const char * node_name,
   const char * node_namespace,
   const bool localhost_only)
 {
-  (void)node_name;
-  (void)node_namespace;
-
   if (this->node_count != 0u) {
-    if ((this->localhost_only && !localhost_only) ||
-      (!this->localhost_only && localhost_only))
+    if ((this->base->options.localhost_only == RMW_LOCALHOST_ONLY_ENABLED) != localhost_only)
     {
       RCUTILS_LOG_ERROR_NAMED(
         RMW_GURUMDDS_ID,
@@ -67,7 +264,9 @@ rmw_context_impl_t::initialize_node(
     return ret;
   }
 
-  if (graph_enable(this->base) != RMW_RET_OK) {
+  if (rmw_gurumdds_cpp::graph_cache::enable(this->base) != RMW_RET_OK) {
+    dds_Entity_set_context(
+      reinterpret_cast<dds_Entity *>(this->participant), 0, nullptr);
     RCUTILS_LOG_ERROR_NAMED(RMW_GURUMDDS_ID, "failed to enable graph cache");
     return RMW_RET_ERROR;
   }
@@ -81,7 +280,7 @@ rmw_context_impl_t::initialize_node(
 }
 
 rmw_ret_t
-rmw_context_impl_t::finalize_node()
+rmw_context_impl_s::finalize_node()
 {
   this->node_count--;
   if (0u != this->node_count) {
@@ -93,14 +292,14 @@ rmw_context_impl_t::finalize_node()
 }
 
 rmw_ret_t
-rmw_context_impl_t::initialize_participant(
+rmw_context_impl_s::initialize_participant(
   const char * node_name,
   const char * node_namespace,
   const bool localhost_only)
 {
   dds_PublisherQos publisher_qos;
   dds_SubscriberQos subscriber_qos;
-  rmw_context_impl_t * const ctx = this;
+  rmw_context_impl_s * const ctx = this;
 
   auto scope_exit_dp_finalize = rcpputils::make_scope_exit(
     [ctx, &publisher_qos, &subscriber_qos]()
@@ -165,8 +364,8 @@ rmw_context_impl_t::initialize_participant(
   }
 
   participant_qos.user_data.size = node_user_data.size();
-  memset(participant_qos.user_data.value, 0, sizeof(participant_qos.user_data.value));
-  memcpy(participant_qos.user_data.value, node_user_data.c_str(), node_user_data.size());
+  std::memset(participant_qos.user_data.value, 0, sizeof(participant_qos.user_data.value));
+  std::memcpy(participant_qos.user_data.value, node_user_data.c_str(), node_user_data.size());
 
   std::string static_discovery_id;
   static_discovery_id += node_namespace;
@@ -180,11 +379,11 @@ rmw_context_impl_t::initialize_participant(
       {const_cast<char *>("gurumdds.static_discovery.id"),
         const_cast<void *>(static_cast<const void *>(static_discovery_id.c_str()))},
       {const_cast<char *>("dcps.participant.listener.on_remote_participant_changed"),
-        reinterpret_cast<void *>(on_participant_changed)},
+        reinterpret_cast<void *>(rmw_gurumdds_cpp::on_participant_changed)},
       {const_cast<char *>("dcps.participant.listener.on_remote_publication_changed"),
-        reinterpret_cast<void *>(on_publication_changed)},
+        reinterpret_cast<void *>(rmw_gurumdds_cpp::on_publication_changed)},
       {const_cast<char *>("dcps.participant.listener.on_remote_subscription_changed"),
-        reinterpret_cast<void *>(on_subscription_changed)},
+        reinterpret_cast<void *>(rmw_gurumdds_cpp::on_subscription_changed)},
       {nullptr, nullptr},
     };
     this->participant = dds_DomainParticipantFactory_create_participant_w_props(
@@ -194,11 +393,11 @@ rmw_context_impl_t::initialize_participant(
       {const_cast<char *>("gurumdds.static_discovery.id"),
         const_cast<void *>(static_cast<const void *>(static_discovery_id.c_str()))},
       {const_cast<char *>("dcps.participant.listener.on_remote_participant_changed"),
-        reinterpret_cast<void *>(on_participant_changed)},
+        reinterpret_cast<void *>(rmw_gurumdds_cpp::on_participant_changed)},
       {const_cast<char *>("dcps.participant.listener.on_remote_publication_changed"),
-        reinterpret_cast<void *>(on_publication_changed)},
+        reinterpret_cast<void *>(rmw_gurumdds_cpp::on_publication_changed)},
       {const_cast<char *>("dcps.participant.listener.on_remote_subscription_changed"),
-        reinterpret_cast<void *>(on_subscription_changed)},
+        reinterpret_cast<void *>(rmw_gurumdds_cpp::on_subscription_changed)},
       {nullptr, nullptr},
     };
     this->participant = dds_DomainParticipantFactory_create_participant_w_props(
@@ -250,15 +449,14 @@ rmw_context_impl_t::initialize_participant(
     return RMW_RET_ERROR;
   }
 
-  dds_Entity_set_context(
-    reinterpret_cast<dds_Entity *>(this->participant), 0, reinterpret_cast<void *>(this));
-
   // Initialize graph_cache
-  if (graph_cache_initialize(this) != RMW_RET_OK) {
+  if (rmw_gurumdds_cpp::graph_cache::initialize(this) != RMW_RET_OK) {
     RMW_SET_ERROR_MSG("failed to initialize graph cache");
     return RMW_RET_ERROR;
   }
 
+  dds_Entity_set_context(
+    reinterpret_cast<dds_Entity *>(this->participant), 0, reinterpret_cast<void *>(this));
   scope_exit_dp_finalize.cancel();
 
   RCUTILS_LOG_DEBUG_NAMED(
@@ -269,10 +467,10 @@ rmw_context_impl_t::initialize_participant(
 }
 
 rmw_ret_t
-rmw_context_impl_t::finalize_participant()
+rmw_context_impl_s::finalize_participant()
 {
   // Finalize graph_cache
-  if (RMW_RET_OK != graph_cache_finalize(this)) {
+  if (RMW_RET_OK != rmw_gurumdds_cpp::graph_cache::finalize(this)) {
     RMW_SET_ERROR_MSG("failed to finalize graph cache");
     return RMW_RET_ERROR;
   }
@@ -339,7 +537,7 @@ rmw_context_impl_t::finalize_participant()
 }
 
 rmw_ret_t
-rmw_context_impl_t::finalize()
+rmw_context_impl_s::finalize()
 {
   dds_DomainParticipantFactory * factory = dds_DomainParticipantFactory_get_instance();
 
